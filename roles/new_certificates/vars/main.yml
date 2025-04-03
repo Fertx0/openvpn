@@ -1,0 +1,15 @@
+# OpenVPN directories
+ovpn_keys_dir: "/home/fmunozma/client-configs/keys"
+ovpn_easyrsa_dir: "/home/fmunozma/EasyRSA-3.2.2"
+
+# CA Server configuration
+ca_server_user: "fmunozma"
+ca_server_host: "ca-server"
+transfer_method: "synchronize"  # or "scp" if needed
+
+# Security settings
+key_mode: '0400'
+req_mode: '0644'
+
+log_dir: "/home/fmunozma/logs/ansible"
+log_file: "{{ log_dir }}/openvpn_cert_management.log"

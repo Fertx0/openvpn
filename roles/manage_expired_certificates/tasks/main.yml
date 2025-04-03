@@ -1,0 +1,176 @@
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - ovpn_keys_dir is defined
+      - openvpn_users is defined
+      - expiry_threshold_days | int > 0
+    fail_msg: "Missing required configuration"
+  tags: always
+
+- name: Ensure /backups directory exists
+  ansible.builtin.file:
+    path: "{{ ovpn_keys_dir }}/backups"
+    state: directory
+    mode: '0755'
+  tags: cert_cleanup
+
+- name: Ensure log directory exists on control node
+  ansible.builtin.file:
+    path: "{{ log_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: logging
+
+- name: Create log file if it doesn't exist
+  ansible.builtin.file:
+    path: "{{ log_file }}"
+    state: touch
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: logging
+
+- name: Get current timestamp
+  ansible.builtin.set_fact:
+    current_time: "{{ ansible_date_time.epoch }}"
+  tags: cert_check
+
+- name: Check certificate expiry dates
+  ansible.builtin.shell: |
+    expiry_date=$(openssl x509 -enddate -noout -in {{ ovpn_keys_dir }}/{{ item.name }}.crt | cut -d= -f2)
+    date -u -d "$expiry_date" +%s
+  register: cert_expiry
+  with_items: "{{ openvpn_users }}"
+  when: item.state == "active"
+  ignore_errors: true
+  changed_when: false
+  tags: cert_check
+
+- name: Set fact for expiring certificates and log
+  ansible.builtin.set_fact:
+    expiring_certs: "{{ expiring_certs | default([]) + [item.item | combine({'expiry_time': item.stdout})] }}"
+  loop: "{{ cert_expiry.results }}"
+  when:
+    - item.stdout is defined
+    - (item.stdout | int) - (current_time | int) <= (expiry_threshold_days | int * 86400)
+  tags:
+    - cert_check
+    - logging
+
+- name: Log detected expiring certificates
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: >-
+      {{ ansible_date_time.iso8601 }} - Detected expiring certificate for
+      {{ item.name }} (Expires in {{ expiry_days }} days)
+  loop: "{{ expiring_certs }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    expiry_days: "{{ ((item.expiry_time | int) - (current_time | int)) // 86400 }}"
+  tags: logging
+
+- name: Backup certificates
+  community.general.archive:
+    path: "{{ ovpn_keys_dir }}"
+    dest: "{{ ovpn_keys_dir }}/backups/certs-{{ ansible_date_time.iso8601 }}.tgz"
+    exclude_path:
+      - "{{ ovpn_keys_dir }}/backups"
+    mode: '0644'
+  ignore_errors: true
+  when: expiring_certs | length > 0
+  become: true
+  register: backup_result
+  tags: cert_cleanup
+
+- name: Remove expiring certificate files
+  ansible.builtin.file:
+    path: "{{ ovpn_keys_dir }}/{{ item.name }}.crt"
+    state: absent
+  loop: "{{ expiring_certs }}"
+  register: cert_removal
+  when:
+    - expiring_certs | length > 0
+    - not dry_run
+  tags: cert_cleanup
+
+- name: Log removed certificates
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Removed certificate for {{ item.name }}"
+  loop: "{{ expiring_certs }}"
+  when:
+    - expiring_certs | length > 0
+    - not dry_run
+  delegate_to: localhost
+  become: false
+  tags: logging
+
+- name: Remove expiring key files
+  ansible.builtin.file:
+    path: "{{ ovpn_keys_dir }}/{{ item.name }}.key"
+    state: absent
+  loop: "{{ expiring_certs }}"
+  register: key_removal
+  when:
+    - expiring_certs | length > 0
+    - not dry_run
+  tags: cert_cleanup
+
+- name: Log removed keys
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Removed key for {{ item.name }}"
+  loop: "{{ expiring_certs }}"
+  when:
+    - expiring_certs | length > 0
+    - not dry_run
+  delegate_to: localhost
+  become: false
+  tags: logging
+
+- name: Install the python3-sendmail package
+  ansible.builtin.apt:
+    name: sendmail
+    state: present
+    update_cache: true
+  become: true
+
+- name: Queue expiry notifications
+  ansible.builtin.set_fact:
+    notifications_needed: "{{ expiring_certs | length > 0 }}"
+  changed_when: expiring_certs | length > 0
+  tags:
+    - cert_check
+    - logging
+
+- name: Log queued notifications
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Queued expiry notification for {{ item.name }} <{{ item.email }}>"
+  loop: "{{ expiring_certs }}"
+  delegate_to: localhost
+  become: false
+  tags: logging
+
+- name: Log summary
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Processed {{ expiring_certs | length }} certificates"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: logging
+
+- name: Dry run information
+  ansible.builtin.debug:
+    msg: "Dry run mode: Would have removed certificate for {{ item.name }}"
+  loop: "{{ expiring_certs }}"
+  when:
+    - expiring_certs | length > 0
+    - dry_run
+  tags: cert_cleanup

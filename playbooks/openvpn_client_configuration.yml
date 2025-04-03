@@ -1,0 +1,158 @@
+---
+- name: Setup OpenVPN Client Configuration
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+
+  tasks:
+    - name: Ensure ovpn_files_dir exists
+      ansible.builtin.file:
+        path: "{{ ovpn_files_dir }}"
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Manage Expired Certificates
+      roles:
+        manage_expired_certificates
+    
+    - name: Copy sample client configuration
+      ansible.builtin.copy:
+        src: "/usr/share/doc/openvpn/examples/sample-config-files/client.conf"
+        dest: "{{ ovpn_files_dir }}/base.conf"
+        remote_src: true
+
+      become: true
+
+    - name: Update remote directive in base.conf
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^remote my-server-1'
+        line: "remote {{ openvpn_server_host }} {{ openvpn_server_port }}"
+      become: true
+
+    - name: Update proto directive in base.conf
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^proto'
+        line: "proto {{ openvpn_protocol }}"
+      become: true
+
+    - name: Uncomment user directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^;user'
+        line: "user nobody"
+      become: true
+
+    - name: Uncomment group directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^;group'
+        line: "group nogroup"
+      become: true
+
+    - name: Comment out ca directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^ca'
+        line: ";ca ca.crt"
+      become: true
+
+    - name: Comment out cert directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^cert'
+        line: ";cert client.crt"
+      become: true
+
+    - name: Comment out key directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^key'
+        line: ";key client.key"
+      become: true
+
+    - name: Comment out tls-auth directive
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^tls-auth'
+        line: ";tls-auth ta.key 1"
+      become: true
+
+    - name: Set cipher setting
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^cipher'
+        line: "cipher AES-256-CBC"
+      become: true
+
+    - name: Set auth setting
+      ansible.builtin.lineinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        regexp: '^auth'
+        line: "auth SHA256"
+      become: true
+
+    - name: Add key-direction directive
+      ansible.builtin.blockinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        marker: "# {mark key-direction}"
+        block: |
+          key-direction 1
+      become: true
+
+    - name: Add DNS resolution lines for non-systemd clients
+      ansible.builtin.blockinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        marker: "# {mark dns-non-systemd}"
+        block: |
+          ; script-security 2
+          ; up /etc/openvpn/update-resolv-conf
+          ; down /etc/openvpn/update-resolv-conf
+      become: true
+
+    - name: Add DNS resolution lines for systemd-resolved clients
+      ansible.builtin.blockinfile:
+        path: "{{ ovpn_files_dir }}/base.conf"
+        marker: "# {mark dns-systemd-resolved}"
+        block: |
+          ; script-security 2
+          ; up /etc/openvpn/update-systemd-resolved
+          ; down /etc/openvpn/update-systemd-resolved
+          ; down-pre
+          ; dhcp-option DOMAIN-ROUTE .
+      become: true
+
+    - name: Create make_config.sh script
+      ansible.builtin.copy:
+        dest: "~/client-configs/make_config.sh"
+        content: |
+          #!/bin/bash
+
+          # First argument: Client identifier
+
+          KEY_DIR=~/client-configs/keys
+          OUTPUT_DIR=~/client-configs/files
+          BASE_CONFIG=~/client-configs/base.conf
+
+          cat ${BASE_CONFIG} \
+              <(echo -e '<ca>') \
+              ${KEY_DIR}/ca.crt \
+              <(echo -e '</ca>\n<cert>') \
+              ${KEY_DIR}/${1}.crt \
+              <(echo -e '</cert>\n<key>') \
+              ${KEY_DIR}/${1}.key \
+              <(echo -e '</key>\n<tls-auth>') \
+              ${KEY_DIR}/ta.key \
+              <(echo -e '</tls-auth>') \
+              > ${OUTPUT_DIR}/${1}.ovpn
+
+    - name: Set execute permissions on make_config.sh
+      ansible.builtin.file:
+        path: "~/client-configs/make_config.sh"
+        mode: '0700'
+
+    - name: Debug script permissions
+      ansible.builtin.debug:
+        msg: "Set permissions on make_config.sh to 700."

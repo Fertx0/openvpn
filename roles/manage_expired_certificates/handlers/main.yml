@@ -1,0 +1,19 @@
+- name: Send expiry notifications
+  community.general.mail:
+    to: "{{ item.email }}"
+    subject: "OpenVPN Certificate Expiry Notification"
+    body: "{{ lookup('template', 'email-notification.j2') }}"
+    from: fertxo@gmail.com
+  delegate_to: localhost
+  loop: "{{ expiring_certs }}"
+  vars:
+    user: "{{ item }}"
+    days_remaining: >-
+      {{ ((cert_expiry.results |
+           selectattr('item.name', 'equalto', item.name) |
+           first).stdout | int -
+          ansible_date_time.epoch | int) // 86400 }}
+    detection_time: "{{ ansible_date_time.iso8601 }}"
+    threshold_days: "{{ expiry_threshold_days }}"
+    action_taken: true
+  when: expiring_certs | length > 0

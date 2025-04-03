@@ -1,0 +1,8 @@
+---
+- name: Check CA Server Status
+  hosts: home-services
+  roles:
+    - role: manage_lxc
+      vars:
+        manage_lxc_name: "ca-server"
+        manage_lxc_action: "status"

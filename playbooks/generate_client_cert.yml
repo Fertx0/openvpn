@@ -1,0 +1,108 @@
+---
+- name: Manage OpenVPN Certificates
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+  tasks:
+    - name: Create directories if they do not exist
+      ansible.builtin.file:
+        path: "{{ ovpn_keys_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Check for existing certificates
+      ansible.builtin.command: "ls {{ ovpn_keys_dir }}/{{ item.name }}.crt"
+      register: cert_check
+      ignore_errors: true
+      with_items: "{{ openvpn_users }}"
+      when: item.state == "active"
+      changed_when: false
+
+
+    - name: Set fact for users without certs
+      ansible.builtin.set_fact:
+        users_without_cert: >
+          {{ cert_check.results | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}
+
+    - name: Debug certificate check results
+      ansible.builtin.debug:
+        var: users_without_cert
+
+    - name: Remove existing key file if present
+      ansible.builtin.file:
+        path: "{{ ovpn_easyrsa_dir }}/pki/private/{{ item.item.name }}.key"
+        state: absent
+      when: item.item.state == "active" and item.rc != 0
+      with_items: "{{ cert_check.results }}"
+      become: true
+
+    - name: Remove existing request file if present
+      ansible.builtin.file:
+        path: "{{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.item.name }}.req"
+        state: absent
+      when: item.item.state == "active" and item.rc != 0
+      with_items: "{{ cert_check.results }}"
+      become: true
+
+    - name: Create req and key for active users without certs
+      ansible.builtin.expect:
+        command: "{{ ovpn_easyrsa_dir }}/easyrsa gen-req {{ item.item.name }} nopass"
+        responses:
+          "Confirm key overwrite: ": "yes"
+          "Common Name.*": "{{ item.item.name }}"
+      args:
+        chdir: "{{ ovpn_easyrsa_dir }}"
+      when: item.item.state == "active" and item.rc != 0
+      with_items: "{{ cert_check.results }}"
+
+    - name: Move key file to client directory
+      ansible.builtin.command: "mv {{ ovpn_easyrsa_dir }}/pki/private/{{ item.item.name }}.key {{ ovpn_keys_dir }}/"
+      when: item.item.state == "active" and item.rc != 0
+      with_items: "{{ cert_check.results }}"
+      changed_when: false
+
+    - name: Copy req file to CA server using SCP
+      ansible.builtin.command: "scp {{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.item.name }}.req {{ ca_server_user }}@{{ ca_server_host }}:/tmp/"
+      when: item.item.state == "active" and item.rc != 0
+      with_items: "{{ cert_check.results }}"
+      changed_when: false
+
+
+- name: Prepare CA server
+  hosts: ca-server
+  tasks:
+    - name: Install pip3
+      ansible.builtin.package:
+        name: python3-pip
+        state: present
+      become: true
+
+    - name: Ensure pexpect is installed using apt
+      ansible.builtin.package:
+        name: python3-pexpect
+        state: present
+      become: true
+
+- name: Sign and import the req file on CA server
+  hosts: ca-server
+  roles:
+    - sign_and_transfer
+  vars_files:
+    - ../vars/openvpn.yml
+
+- name: Organize Certificates on OpenVPN Server
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+  tasks:
+    - name: Ensure client directory exists
+      ansible.builtin.file:
+        path: "{{ ovpn_keys_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Move .crt files from tmp to correct directory
+      ansible.builtin.command: "mv /tmp/{{ item.name }}.crt {{ ovpn_keys_dir }}/"
+      with_items: "{{ users_without_cert }}"
+      when: item.state == "active"
+      changed_when: false

@@ -1,0 +1,13 @@
+- name: Revoke inactive OpenVPN users
+  hosts: openvpn
+  gather_facts: no
+  vars_files:
+    - ../vars/openvpn.yml
+  tasks:
+    - name: Send expiry notifications
+      ansible.builtin.mail:
+        to: "fer@cisco.com"
+        subject: "OpenVPN Certificate Expiry Notification"
+        body: "Your certificate will expire soon."
+        from: "fertxo@gmail.com"
+      delegate_to: localhost

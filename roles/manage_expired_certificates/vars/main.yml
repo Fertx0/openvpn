@@ -1,0 +1,6 @@
+# Logging configuration
+log_dir: "/home/fmunozma/logs/ansible"
+log_file: "{{ log_dir }}/openvpn_cert_management.log"
+expiry_threshold_days: 7
+
+dry_run: false

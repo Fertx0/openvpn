@@ -1,0 +1,108 @@
+---
+- name: Ensure certificate directory exists
+  ansible.builtin.file:
+    path: "{{ ovpn_keys_dir }}"
+    state: directory
+    mode: '0700'
+  tags: initialization
+
+- name: Check for existing certificates using stat
+  ansible.builtin.stat:
+    path: "{{ ovpn_keys_dir }}/{{ item.name }}.crt"
+  loop: "{{ openvpn_users }}"
+  when: item.state == "active"
+  register: cert_stat_results
+  tags: cert_check
+
+- name: Initialize empty certificate list
+  ansible.builtin.set_fact:
+    users_needing_certs: []
+  tags: cert_check
+
+- name: Identify users needing certificates (stat method)
+  ansible.builtin.set_fact:
+    users_needing_certs: "{{ users_needing_certs + [item.item] }}"
+  loop: "{{ cert_stat_results.results }}"
+  when: not item.stat.exists
+  tags: cert_check
+
+- name: Log users needing certificates
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Certificate needed for user: {{ item.name }}"
+  loop: "{{ users_needing_certs }}"
+  delegate_to: localhost
+  become: false
+  tags: logging
+  when: users_needing_certs | length > 0  # Now safe because variable always exists
+
+- name: Clean existing key files
+  ansible.builtin.file:
+    path: "{{ ovpn_easyrsa_dir }}/pki/private/{{ item.name }}.key"
+    state: absent
+  loop: "{{ users_needing_certs }}"
+  become: true
+  tags: cleanup
+
+- name: Clean existing request files
+  ansible.builtin.file:
+    path: "{{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req"
+    state: absent
+  loop: "{{ users_needing_certs }}"
+  become: true
+  tags: cleanup
+
+- name: Generate certificate requests
+  ansible.builtin.expect:
+    command: "{{ ovpn_easyrsa_dir }}/easyrsa gen-req {{ item.name }} nopass"
+    responses:
+      "Confirm key overwrite: ": "yes"
+      "Common Name.*": "{{ item.name }}"
+    creates: "{{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req"
+  args:
+    chdir: "{{ ovpn_easyrsa_dir }}"
+  loop: "{{ users_needing_certs }}"
+  tags: cert_generation
+
+- name: Log certificate request generation
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Certificate request generated for user: {{ item.name }}"
+  loop: "{{ users_needing_certs }}"
+  delegate_to: localhost
+  become: false
+  tags: logging
+
+- name: Move generated keys to client directory
+  ansible.builtin.copy:
+    src: "{{ ovpn_easyrsa_dir }}/pki/private/{{ item.name }}.key"
+    dest: "{{ ovpn_keys_dir }}/"
+    remote_src: true
+    mode: '0400'
+  loop: "{{ users_needing_certs }}"
+  tags: file_management
+
+- name: Log key moved to client directory
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Key moved to client directory for user: {{ item.name }}"
+  loop: "{{ users_needing_certs }}"
+  delegate_to: localhost
+  become: false
+  tags: logging
+
+- name: Transfer requests to CA server
+  ansible.builtin.command:
+    cmd: "scp {{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req {{ ca_server_user }}@{{ ca_server_host }}:/tmp/{{ item.name }}.req"
+  loop: "{{ users_needing_certs }}"
+  changed_when: false
+  tags: ca_transfer
+
+- name: Log request transferred to CA server
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - Certificate request transferred to CA server for user: {{ item.name }}"
+  loop: "{{ users_needing_certs }}"
+  delegate_to: localhost
+  become: false
+  tags: logging

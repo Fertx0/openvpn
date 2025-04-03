@@ -1,0 +1,21 @@
+Dear {{ user.name }},
+
+Your OpenVPN certificate{% if (days_remaining|int) > 0 %} will expire in {{ days_remaining }} days{% else %} has expired{% endif %}.
+
+{% if action_taken %}
+**Immediate Action Taken:**
+- Certificate file deleted: {{ user.name }}.crt
+- Key file deleted: {{ user.name }}.key
+{% endif %}
+
+Next Steps:
+1. New certificate will be issued within 24 hours
+2. Contact fertxo@gmail.com for urgent requests
+
+Expiry Details:
+- Certificate Name: {{ user.name }}
+- Detected Expiry: {{ detection_time }}
+- Threshold: {{ threshold_days }} days
+
+Best regards,
+Network Security Team

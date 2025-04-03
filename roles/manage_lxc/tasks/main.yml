@@ -1,0 +1,40 @@
+---
+- name: Get the VMID of the LXC container
+  ansible.builtin.command: pct list
+  register: pct_list
+  changed_when: false
+
+- name: Extract VMID for {{ manage_lxc_name }}
+  ansible.builtin.set_fact:
+    lxc_vmid: "{{ pct_list.stdout_lines | select('search', manage_lxc_name) | map('split') | map('first') | first }}"
+
+- name: Fail if LXC container does not exist - {{ manage_lxc_name }}
+  ansible.builtin.fail:
+    msg: "LXC container {{ manage_lxc_name }} not found on Proxmox"
+  when: lxc_vmid is not defined or lxc_vmid == ""
+
+- name: Check if LXC container is running - {{ manage_lxc_name }}
+  ansible.builtin.command: pct status {{ lxc_vmid }}
+  register: pct_status
+  changed_when: false
+
+- name: Start if LXC container stopped - {{ manage_lxc_name }}
+  ansible.builtin.command: pct start {{ lxc_vmid }}
+  when:
+    - manage_lxc_action == "start"
+    - "'stopped' in pct_status.stdout"
+  changed_when: true
+  become: true
+
+- name: Stop if container LXR is running - {{ manage_lxc_name }}
+  ansible.builtin.command: pct stop {{ lxc_vmid }}
+  when:
+    - manage_lxc_action == "stop"
+    - "'running' in pct_status.stdout"
+  changed_when: true
+  become: true
+
+- name: Show current status of {{ manage_lxc_name }}
+  ansible.builtin.debug:
+    msg: "Container {{ manage_lxc_name }} is currently {{ pct_status.stdout.split(':')[1] | trim }}"
+  when: manage_lxc_action == "status"

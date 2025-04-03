@@ -1,0 +1,95 @@
+- name: Revoke inactive OpenVPN users
+  hosts: ca-server
+  gather_facts: no
+  vars_files:
+    - ../vars/openvpn.yml
+  tasks:
+    - name: Fetch index.txt from CA server
+      ansible.builtin.slurp:
+        src: "{{ ca_easyrsa_dir }}/pki/index.txt"
+      register: index_txt_raw
+
+    - name: Decode index.txt
+      ansible.builtin.set_fact:
+        index_txt: "{{ index_txt_raw['content'] | b64decode | split('\n') }}"
+
+    - name: Debug the decoded index.txt content
+      ansible.builtin.debug:
+        var: index_txt
+
+    - name: Extract valid certificates from index.txt
+      ansible.builtin.set_fact:
+        valid_certs_raw: "{{ index_txt | select('search', '^V') | map('split', '\t') | map(attribute=5) | list }}"
+
+    - name: Debug the valid certificates raw (before any processing)
+      ansible.builtin.debug:
+        var: valid_certs_raw
+
+    - name: Remove "/CN=" prefix from valid certificates
+      ansible.builtin.set_fact:
+        valid_certs: "{{ valid_certs_raw | map('regex_replace', '^/CN=', '') | list }}"
+
+    - name: Debug the valid certificates after regex_replace
+      ansible.builtin.debug:
+        var: valid_certs
+
+    - name: Find inactive users with valid certificates
+      ansible.builtin.set_fact:
+        revoke_list: "{{ openvpn_users | selectattr('state', 'equalto', 'inactive') | map(attribute='name') | list | intersect(valid_certs) }}"
+
+    - name: Debug the revoke list
+      ansible.builtin.debug:
+        var: revoke_list
+
+    - name: Check if certificate is already revoked
+      ansible.builtin.shell: |
+        awk '$1=="R" {print $4}' {{ ca_easyrsa_dir }}/pki/index.txt
+      register: revoked_certs
+      changed_when: false
+
+    - name: Debug the revoked certificates output
+      ansible.builtin.debug:
+        var: revoked_certs.stdout_lines
+
+    - name: Revoke certificates for inactive users
+      ansible.builtin.command: "{{ ca_easyrsa_dir }}/easyrsa --batch revoke {{ item }}"
+      environment:
+        EASYRSA_PKI: "{{ ca_easyrsa_dir }}/pki"
+      loop: "{{ revoke_list }}"
+      when:
+        - revoke_list | length > 0
+        - item not in revoked_certs.stdout_lines
+
+    - name: Generate new CRL
+      ansible.builtin.command: "{{ ca_easyrsa_dir }}/easyrsa gen-crl"
+      environment:
+        EASYRSA_PKI: "{{ ca_easyrsa_dir }}/pki"
+      when: revoke_list | length > 0
+      register: gen_crl_result
+
+    - name: Check if crl.pem exists
+      ansible.builtin.stat:
+        path: "{{ ca_easyrsa_dir }}/pki/crl.pem"
+      register: crl_file
+
+    - name: Transfer CRL to OpenVPN server
+      ansible.builtin.command:
+        cmd: "scp {{ ca_easyrsa_dir }}/pki/crl.pem fmunozma@openvpn:/tmp/crl.pem"
+      register: scp_result
+      # Let SCP fail naturally if it can't transfer (e.g., SSH issues)
+      when:
+        - revoke_list | length > 0
+        - gen_crl_result is success
+        - crl_file.stat.exists
+
+    - name: Move CRL to final directory on OpenVPN server
+      ansible.builtin.command:
+        cmd: "mv /tmp/crl.pem /etc/openvpn/crl.pem"
+      become: yes
+      become_user: root
+      delegate_to: openvpn
+      when:
+        - revoke_list | length > 0
+        - gen_crl_result is success
+        - crl_file.stat.exists
+        - scp_result.rc is defined and scp_result.rc == 0  # Only run if SCP succeeded

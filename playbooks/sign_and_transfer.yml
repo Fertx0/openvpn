@@ -1,0 +1,7 @@
+---
+- name: Sign certificates on CA server
+  hosts: ca-server
+  vars_files:
+    - ../vars/openvpn.yml
+  roles:
+    - role: sign_and_transfer

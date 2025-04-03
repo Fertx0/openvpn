@@ -1,0 +1,7 @@
+---
+- name: Build and send the ovpn file
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+  roles:
+    - role: build_and_send_ovpn

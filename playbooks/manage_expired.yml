@@ -1,0 +1,9 @@
+---
+- name: Manage OpenVPN Certificates
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+  vars:
+    log_file: "/var/log/ansible/openvpn_cert_management.log"
+  roles:
+    - manage_expired_certificates

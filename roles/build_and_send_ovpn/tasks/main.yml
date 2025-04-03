@@ -1,0 +1,55 @@
+- name: Gather signed certificates in /tmp
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "*.crt"
+  register: tmp_certs
+
+- name: Set fact for users with certs in /tmp
+  ansible.builtin.set_fact:
+    users_with_tmp_certs: "{{ tmp_certs.files | map(attribute='path') | map('basename') | map('splitext') | map('first') | list }}"
+  tags: cert_check
+
+- name: Move signed certificates to client-configs/keys
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ ovpn_keys_dir }}/{{ item.path | basename }}"
+    remote_src: true
+    mode: '0600'
+  loop: "{{ tmp_certs.files }}"
+  become: true
+  tags: file_management
+
+- name: Remove signed certificates from /tmp
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ tmp_certs.files }}"
+  become: true
+  tags: cleanup
+
+- name: Generate .ovpn files
+  ansible.builtin.command:
+    cmd: "{{ client_configs_dir }}/make_config.sh {{ item }}"
+    chdir: "{{ client_configs_dir }}"
+  loop: "{{ users_with_tmp_certs }}"
+  become: true
+  tags: ovpn_generation
+  changed_when: false
+
+- name: Email .ovpn files to users with certificates in /tmp
+  community.general.mail:
+    subject: "Your OpenVPN Configuration File"
+    body: "{{ lookup('template', 'ovpn_email.j2') }}"
+    to: "{{ item.email }}"
+    attach: "{{ client_configs_dir }}/files/{{ item.name }}.ovpn"
+  loop: "{{ openvpn_users | selectattr('state', 'eq', 'active') | selectattr('name', 'in', users_with_tmp_certs) }}"
+  run_once: false
+
+- name: Log .ovpn file creation and email
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} - .ovpn file created and emailed for user: {{ item }}"
+  loop: "{{ openvpn_users | selectattr('state', 'eq', 'active') | selectattr('name', 'in', users_with_tmp_certs) }}"
+  delegate_to: localhost
+  become: false
+  tags: logging

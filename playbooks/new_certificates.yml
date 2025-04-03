@@ -1,0 +1,7 @@
+- name: Manage OpenVPN Certificates
+  hosts: openvpn
+  vars_files:
+    - ../vars/openvpn.yml
+  roles:
+    - role: new_certificates
+      tags: openvpn_certs
