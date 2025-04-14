@@ -4,7 +4,7 @@
     patterns: "*.crt"
   register: tmp_certs
 
-- name: Set fact for users with certs in /tmp 
+- name: Set fact for users with certs in /tmp
   ansible.builtin.set_fact:
     users_with_tmp_certs: "{{ tmp_certs.files | map(attribute='path') | map('basename') | map('splitext') | map('first') | list }}"
   tags: cert_check

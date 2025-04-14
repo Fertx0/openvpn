@@ -2,4 +2,3 @@
 /.vscode
 /ansible.cfg
 /inventory.yml
-/openvpn.code-workspace
