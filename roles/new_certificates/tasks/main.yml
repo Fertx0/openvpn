@@ -91,11 +91,14 @@
   become: false
   tags: logging
 
-- name: Transfer requests to CA server
-  ansible.builtin.command:
-    cmd: "scp {{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req {{ ca_server_user }}@{{ ca_server_host }}:/tmp/{{ item.name }}.req"
+- name: Transfer requests to CA server using transfer_file role
+  ansible.builtin.include_role:
+    name: transfer_file
+  vars:
+    transfer_src: "{{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req"
+    transfer_dest: "{{ ca_server_host }}:/tmp/{{ item.name }}.req"
+    transfer_remote_src: true # El origen está en el host donde se ejecuta este rol (OpenVPN)
   loop: "{{ users_needing_certs }}"
-  changed_when: false
   tags: ca_transfer
 
 - name: Log request transferred to CA server
