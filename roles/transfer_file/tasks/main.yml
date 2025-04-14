@@ -1,0 +1,7 @@
+---
+- name: Transfer file
+  ansible.builtin.copy:
+    src: "{{ transfer_src }}"
+    dest: "{{ transfer_dest }}"
+    remote_src: "{{ transfer_remote_src | default('true') }}"
+    mode: '0644'  # Ejemplo de permisos: lectura/escritura para el propietario, lectura para grupo y otros
