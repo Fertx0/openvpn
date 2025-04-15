@@ -1,9 +1,20 @@
 ---
-- name: Ensure certificate directory exists
-  ansible.builtin.file:
-    path: "{{ ovpn_keys_dir }}"
-    state: directory
-    mode: '0700'
+- name: Ensure certificate directories exist
+  block:
+    - name: Ensure keys directory exists
+      ansible.builtin.file:
+        path: "{{ ovpn_keys_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Ensure reqs directory exists on CA server
+      ansible.builtin.file:
+        path: "/tmp/reqs"
+        state: directory
+        mode: '0750'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+      delegate_to: "{{ ca_server_host }}"
   tags: initialization
 
 - name: Check for existing certificates using stat
@@ -91,13 +102,16 @@
   become: false
   tags: logging
 
-- name: Transfer requests to CA server using transfer_file role
+- name: Transfer request files to CA server's reqs directory
   ansible.builtin.include_role:
     name: transfer_file
   vars:
     transfer_src: "{{ ovpn_easyrsa_dir }}/pki/reqs/{{ item.name }}.req"
-    transfer_dest: "{{ ca_server_host }}:/tmp/{{ item.name }}.req"
-    transfer_remote_src: true # El origen está en el host donde se ejecuta este rol (OpenVPN)
+    transfer_dest_host: "{{ ca_server_host }}"
+    transfer_dest_path: "/tmp/reqs/{{ item.name }}.req"  # Changed to /tmp/reqs
+    transfer_src_host: "{{ openvpn_server_host }}"
+    transfer_dest_user: "{{ ca_server_user }}"
+    transfer_file_mode: "0640"  # Added explicit permissions
   loop: "{{ users_needing_certs }}"
   tags: ca_transfer
 

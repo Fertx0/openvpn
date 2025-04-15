@@ -4,4 +4,4 @@
   vars_files:
     - ../vars/openvpn.yml
   roles:
-    - role: sign_and_transfer
+    - role: sign_reqs

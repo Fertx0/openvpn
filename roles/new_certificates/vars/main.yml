@@ -13,3 +13,6 @@ req_mode: '0644'
 
 log_dir: "/home/fmunozma/logs/ansible"
 log_file: "{{ log_dir }}/openvpn_cert_management.log"
+
+# Ruta de la clave SSH (opcional, puede pasarse como variable en el playbook)
+transfer_ssh_key: "/home/{{ ansible_user }}/.ssh/id_rsa"

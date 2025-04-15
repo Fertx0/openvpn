@@ -1,7 +1,14 @@
 ---
-- name: Transfer file
-  ansible.builtin.copy:
+- name: Transfer file using rsync
+  ansible.posix.synchronize:
     src: "{{ transfer_src }}"
-    dest: "{{ transfer_dest }}"
-    remote_src: "{{ transfer_remote_src | default('true') }}"
-    mode: '0644'  # Ejemplo de permisos: lectura/escritura para el propietario, lectura para grupo y otros
+    dest: "{{ transfer_dest_user | default(ansible_user) }}@{{ transfer_dest_host }}:{{ transfer_dest_path }}"
+    mode: push
+    rsync_opts:
+      - "-e 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'"
+    private_key: "{{ transfer_ssh_key | default(ansible_ssh_private_key_file) }}"
+  delegate_to: "{{ transfer_src_host | default(inventory_hostname) }}"
+  when:
+    - transfer_src is defined
+    - transfer_dest_host is defined
+    - transfer_dest_path is defined

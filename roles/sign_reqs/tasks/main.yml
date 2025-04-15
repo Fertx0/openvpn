@@ -1,0 +1,93 @@
+# roles/sign_reqs/tasks/main.yml
+---
+- name: Check for certificate requests
+  ansible.builtin.stat:
+    path: "/tmp/reqs"
+  register: req_dir
+  changed_when: false
+  tags: preparation
+
+- name: Exit if no requests directory exists
+  ansible.builtin.meta: end_play
+  when: not req_dir.stat.exists
+  tags: preparation
+
+- name: Find certificate request files
+  ansible.builtin.find:
+    paths: "/tmp/reqs"
+    patterns: "*.req"
+  register: req_files
+  changed_when: false
+  tags: collection
+
+- name: Exit if no request files found
+  ansible.builtin.meta: end_play
+  when: req_files.matched == 0
+  tags: validation
+
+- name: Clean up existing certificate artifacts
+  block:
+    - name: Remove existing request files from easyrsa
+      ansible.builtin.file:
+        path: "{{ ca_easyrsa_dir }}/pki/reqs/{{ item | basename }}"
+        state: absent
+      loop: "{{ req_files.files | map(attribute='path') | list }}"
+      become: true
+
+    - name: Remove existing certificates from easyrsa
+      ansible.builtin.file:
+        path: "{{ ca_easyrsa_dir }}/pki/issued/{{ item | basename | regex_replace('\\.req$', '') }}.crt"
+        state: absent
+      loop: "{{ req_files.files | map(attribute='path') | list }}"
+      become: true
+  tags: cleanup
+
+- name: Import certificate requests
+  ansible.builtin.command:
+    cmd: "{{ ca_easyrsa_dir }}/easyrsa import-req {{ item.path }} {{ item.path | basename | regex_replace('\\.req$', '') }}"
+    chdir: "{{ ca_easyrsa_dir }}"
+  loop: "{{ req_files.files }}"
+  register: import_results
+  changed_when: false
+  tags: import
+
+- name: Sign certificate requests
+  ansible.builtin.expect:
+    command: "{{ ca_easyrsa_dir }}/easyrsa sign-req client {{ item.path | basename | regex_replace('\\.req$', '') }}"
+    responses:
+      "Confirm requested details.*": "yes"
+    timeout: 30
+  args:
+    chdir: "{{ ca_easyrsa_dir }}"
+  loop: "{{ req_files.files }}"
+  register: signing_results
+  ignore_errors: true
+  tags: signing
+
+- name: Prepare certificates directory
+  ansible.builtin.file:
+    path: "/tmp/certs"
+    state: directory
+    mode: "0750"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_gid }}"
+  tags: setup
+
+- name: Store signed certificates
+  ansible.builtin.copy:
+    src: "{{ ca_issued_cert }}/{{ item.item.path | basename | regex_replace('\\.req$', '') }}.crt"
+    dest: "/tmp/certs/{{ item.item.path | basename | regex_replace('\\.req$', '') }}.crt"
+    remote_src: true
+    mode: "0640"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_gid }}"
+  loop: "{{ signing_results.results }}"
+  when: item is success
+  tags: storage
+
+- name: Clean up processed request files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ req_files.files }}"
+  tags: cleanup

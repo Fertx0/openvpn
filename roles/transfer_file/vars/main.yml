@@ -1,2 +1,4 @@
 ---
-transfer_remote_src: true
+# Default values
+transfer_ssh_key: "~/.ssh/id_rsa"
+transfer_dest_user: "{{ ansible_user }}"
