@@ -1,0 +1,3 @@
+expiry_threshold_days: 7
+easyrsa_version: "3.2.2"  # o la versión que necesites
+ca_easyrsa_dir: "{{ base_dir }}/EasyRSA-{{ easyrsa_version }}"

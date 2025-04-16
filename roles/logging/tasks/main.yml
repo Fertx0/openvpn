@@ -1,0 +1,65 @@
+---
+- name: Ensure log directory exists on control node
+  ansible.builtin.file:
+    path: "{{ log_dir }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  delegate_to: localhost
+  become: true  # Necesario para /var/log/ansible
+  run_once: true
+
+- name: Set default component if not defined
+  ansible.builtin.set_fact:
+    component: "{{ component | default('global') }}"
+  when: component is not defined
+  tags: logging
+
+- name: Create log entry structure
+  ansible.builtin.set_fact:
+    log_entry:
+      timestamp: "{{ ansible_date_time.iso8601 }}"
+      level: "{{ log_level | upper }}"
+      host: "{{ inventory_hostname }}"
+      component: "{{ component }}"
+      message: "{{ log_message }}"
+      data: "{{ log_data | default({}) }}"
+  tags: logging
+
+- name: Format log entry
+  ansible.builtin.set_fact:
+    formatted_entry: >-
+      {% if log_format == 'json' %}
+      {{ log_entry | to_nice_json }}
+      {% else %}
+      {{ log_entry.timestamp }} [{{ log_entry.level }}] {{ log_entry.host }} :: {{ log_entry.component }} :: {{ log_entry.message }}
+      {% if log_entry.data %}
+      Additional Data:
+      {% for key, value in log_entry.data.items() %}
+      - {{ key }}: {{ value | to_nice_json if value is mapping else value }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+  tags: logging
+
+- name: Write log entry to control node
+  delegate_to: localhost
+  run_once: false  # Allows logging per item/host
+  ansible.builtin.lineinfile:
+    path: "{{ log_file }}"
+    line: "{{ formatted_entry }}"
+    create: true
+    mode: '0644'
+    insertafter: EOF
+  tags: logging
+
+- name: Configure log rotation on control node
+  delegate_to: localhost
+  run_once: true
+  become: true
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: "/etc/logrotate.d/ansible_logs"
+  when: log_rotation_enabled | default(true)
+  tags: logging_rotation

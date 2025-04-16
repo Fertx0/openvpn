@@ -1,4 +1,2 @@
 ---
-# Default values
-transfer_ssh_key: "~/.ssh/id_rsa"
-transfer_dest_user: "{{ ansible_user }}"
+transfer_ssh_key: "{{ ansible_ssh_private_key_file }}"

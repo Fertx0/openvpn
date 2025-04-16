@@ -1,3 +1,0 @@
-client_configs_dir: "/home/fmunozma/client-configs"
-log_dir: "/home/fmunozma/logs/ansible"
-log_file: "{{ log_dir }}/openvpn_cert_management.log"

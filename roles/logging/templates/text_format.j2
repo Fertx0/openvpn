@@ -1,0 +1,10 @@
+{# Text format template #}
+{% if log_format == 'text' %}
+{{ timestamp }} [{{ level | upper }}] {% if component %}{{ component }} :: {% endif %}{{ message }}
+{% if log_data %}
+Additional Data:
+{% for key, value in log_data.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+{% endif %}

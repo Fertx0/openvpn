@@ -1,0 +1,8 @@
+# Choose format: 'json' or 'text'
+log_format: "text"
+log_levels: ["DEBUG", "INFO", "WARN", "ERROR"]
+
+# Text formatting templates
+text_format:
+  basic: "{{ timestamp }} [{{ level }}] {{ message }}"
+  detailed: "{{ timestamp }} [{{ level }}] {{ host }} :: {{ component }} :: {{ message }}"

@@ -1,0 +1,4 @@
+key_mode: '0400'
+req_mode: '0644'
+dry_run: false
+easyrsa_version: "3.2.2"  # o la versión que necesites

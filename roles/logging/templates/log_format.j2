@@ -1,0 +1,6 @@
+{
+  "time": "{{ ansible_date_time.iso8601 }}",
+  "level": "{{ log_level }}",
+  "component": "{{ component_name }}",
+  "details": {{ log_details | to_json }}
+}

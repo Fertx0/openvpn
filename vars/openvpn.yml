@@ -28,16 +28,34 @@ openvpn_users:
   - name: "Prueba5"
     state: "active"
     email: "fertxo@gmail.com"
+  - name: "Prueba6"
+    state: "active"
+    email: "fertxo@gmail.com"
+  - name: "Prueba7"
+    state: "active"
+    email: "fertxo@gmail.com"
+  - name: "Prueba8"
+    state: "active"
+    email: "fertxo@gmail.com"
+  - name: "Prueba9"
+    state: "active"
+    email: "fertxo@gmail.com"
 
-# Directory where Easy-RSA files and configurations are stored
-ovpn_easyrsa_dir: "/home/fmunozma/EasyRSA-3.2.2"
-ovpn_keys_dir: "/home/fmunozma/client-configs/keys"
-ovpn_files_dir: "/home/fmunozma/client-configs/files"
-openvpn_server_user: "fmunozma"
+# Server Configuration
 openvpn_server_host: "openvpn"
 openvpn_server_port: "1194"
 openvpn_protocol: "udp"
 
-ca_easyrsa_dir: "/home/fmunozma/EasyRSA-3.2.2"
-ca_server_user: "fmunozma"
+# Path Configuration
+easyrsa_dir: "{{ base_dir }}/EasyRSA-{{ easyrsa_version }}"
+client_configs_dir: "{{ base_dir }}/client-configs"
+keys_dir: "{{ client_configs_dir }}/keys"
+files_dir: "{{ client_configs_dir }}/files"
+
+# CA Configuration
 ca_server_host: "ca-server"
+ca_issued_cert: "{{ easyrsa_dir }}/pki/issued"
+
+# Logging
+log_dir: "/var/log/ansible/openvpn"  # Mejor ubicación estándar
+log_file: "{{ log_dir }}/cert_management.log"

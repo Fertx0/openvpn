@@ -30,7 +30,7 @@
 - name: Move certificates to final directory
   ansible.builtin.copy:
     src: "/tmp/{{ item.path | basename }}"
-    dest: "{{ ovpn_keys_dir }}/{{ item.path | basename }}"
+    dest: "{{ keys_dir }}/{{ item.path | basename }}"
     remote_src: true
     mode: "0600"
   loop: "{{ signed_certs.files }}"
@@ -53,29 +53,72 @@
       loop: "{{ signed_certs.files }}"
   tags: cleanup
 
-- name: Generate and email .ovpn configurations
+- name: Generate and distribute .ovpn configurations
   block:
     - name: Generate .ovpn files
-      ansible.builtin.command:
+      command:
         cmd: "{{ client_configs_dir }}/make_config.sh {{ item }}"
         chdir: "{{ client_configs_dir }}"
       loop: "{{ users_with_certs }}"
       become: true
       tags: ovpn_generation
+      register: config_generation
+      changed_when: false  # We'll log success/failure separately
+
+    - name: Log config generation results
+      include_role:
+        name: logging
+      vars:
+        log_message: "OVPN config {{ 'generated' if item.rc == 0 else 'failed' }}"
+        log_level: "{{ 'INFO' if item.rc == 0 else 'ERROR' }}"
+        component: "config_generation"
+        log_data:
+          username: "{{ item.item }}"
+          return_code: "{{ item.rc }}"
+          output: "{{ item.stdout | default('') }}"
+      loop: "{{ config_generation.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Email configurations
       community.general.mail:
-        subject: "Your OpenVPN Configuration File"
-        body: "{{ lookup('template', 'ovpn_email.j2') }}"
+        subject: "Your OpenVPN Configuration ({{ inventory_hostname }})"
+        body: "{{ lookup('template', 'ovpn_email.j2') | regex_replace('\n+', '\n') }}"
         to: "{{ item.email }}"
         attach: "{{ client_configs_dir }}/files/{{ item.name }}.ovpn"
+        secure: always
       loop: "{{ openvpn_users | selectattr('state', 'eq', 'active') | selectattr('name', 'in', users_with_certs) }}"
-      run_once: false
+      register: email_results
+      no_log: true  # Protects sensitive email content
+      retries: 3
+      delay: 5
+      until: email_results is success
 
-    - name: Log activity
-      ansible.builtin.lineinfile:
-        path: "{{ log_file }}"
-        line: "{{ ansible_date_time.iso8601 }} - Config created for: {{ item.name }}"
-      loop: "{{ openvpn_users | selectattr('state', 'eq', 'active') | selectattr('name', 'in', users_with_certs) }}"
-      delegate_to: localhost
+    - name: Log email delivery
+      include_role:
+        name: logging
+      vars:
+        log_message: "Config {{ 'sent' if email_status else 'failed to send' }}"
+        log_level: "{{ 'NOTICE' if email_status else 'WARN' }}"
+        component: "email_distribution"
+        log_data:
+          username: "{{ item.name }}"
+          email: "{{ item.email | regex_replace('(^.).*(.@.)', '\\1*****\\2') }}"
+          attachment_hash: "{{ lookup('file', client_configs_dir+'/files/'+item.name+'.ovpn') | hash('sha256') }}"
+      loop: "{{ openvpn_users | selectattr('state', 'eq', 'active') | selectattr('name', 'in', users_with_certs) | list }}"
+      when: email_results is changed
+      tags: audit
+
+  rescue:
+    - name: Log configuration failures
+      ansible.builtin.include_role:
+        name: logging
+      vars:
+        log_message: "Critical error in config distribution"
+        log_level: "CRITICAL"
+        component: "config_distribution"
+        log_data:
+          error: "{{ ansible_failed_result.msg }}"
+          affected_users: "{{ users_with_certs | length }}"
+      tags: alerts
   tags: distribution

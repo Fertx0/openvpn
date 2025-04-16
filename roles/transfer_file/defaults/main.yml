@@ -1,0 +1,2 @@
+transfer_method: "synchronize"  # scp/synchronize
+transfer_timeout: 30
